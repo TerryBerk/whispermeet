@@ -140,12 +140,25 @@ class WhisperMeetApp(rumps.App):
         """Process recording: transcribe and generate summary."""
         try:
             from whispermeet.services.diarizer import SpeakerDiarizer
+            from whispermeet.ui import show_speaker_names_dialog
 
             # Run diarization first
             diarizer = SpeakerDiarizer()
             try:
                 diarizer.diarize(audio_path)
                 speakers = diarizer.get_unique_speakers()
+
+                # Show dialog to assign names
+                speaker_samples = diarizer.get_speaker_samples(audio_path)
+                names = show_speaker_names_dialog(
+                    speakers=speakers,
+                    audio_path=audio_path,
+                    speaker_samples=speaker_samples,
+                )
+
+                if names:
+                    diarizer.assign_names(names)
+
                 participant_names = [diarizer.get_name(s) for s in speakers]
 
                 # Transcribe with speaker labels
