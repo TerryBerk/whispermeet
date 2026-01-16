@@ -61,6 +61,21 @@ class AudioCapture: NSObject, ObservableObject {
         duration = 0
     }
 
+    /// Process recorded audio through the Python backend.
+    func processRecording(
+        at url: URL,
+        title: String = "Meeting",
+        speakerNames: [String: String]? = nil,
+        saveVoices: Bool = false
+    ) async throws -> ProcessResponse {
+        return try await BackendClient.shared.processAudio(
+            audioURL: url,
+            title: title,
+            speakerNames: speakerNames,
+            saveVoices: saveVoices
+        )
+    }
+
     private func createOutputURL(for appName: String) -> URL {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd-HHmmss"
