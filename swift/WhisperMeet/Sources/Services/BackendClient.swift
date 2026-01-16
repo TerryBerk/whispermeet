@@ -7,21 +7,53 @@ actor BackendClient {
     private let baseURL = URL(string: "http://127.0.0.1:8765")!
     private var serverProcess: Process?
     private var isServerRunning = false
+    private var lastActivityTime = Date()
+    private var idleCheckTask: Task<Void, Never>?
+
+    /// Idle timeout in seconds before auto-shutdown
+    private let idleTimeout: TimeInterval = 300 // 5 minutes
 
     // MARK: - Server Lifecycle
 
-    /// Start the Python backend server.
-    func startServer() async throws {
-        guard !isServerRunning else { return }
+    /// Ensure server is running (lazy start).
+    private func ensureServerRunning() async throws {
+        // Check if already running
+        if isServerRunning {
+            // Verify it's actually responding
+            do {
+                _ = try await healthCheckInternal()
+                lastActivityTime = Date()
+                return
+            } catch {
+                // Server not responding, restart it
+                isServerRunning = false
+            }
+        }
 
+        // Check if there's already a server running (from another instance)
+        do {
+            _ = try await healthCheckInternal()
+            isServerRunning = true
+            lastActivityTime = Date()
+            startIdleMonitor()
+            return
+        } catch {
+            // No server running, need to start one
+        }
+
+        try await startServerInternal()
+    }
+
+    /// Internal method to start the server.
+    private func startServerInternal() async throws {
         let process = Process()
 
         // Try to find Python in common locations
         let pythonPaths = [
-            "/usr/bin/python3",
-            "/usr/local/bin/python3",
-            "/opt/homebrew/bin/python3",
             NSHomeDirectory() + "/git/whispermeet/python/.venv/bin/python",
+            "/opt/homebrew/bin/python3",
+            "/usr/local/bin/python3",
+            "/usr/bin/python3",
         ]
 
         var pythonPath: String?
@@ -40,14 +72,15 @@ actor BackendClient {
         process.arguments = ["-m", "whispermeet.server"]
         process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory() + "/git/whispermeet/python")
 
-        // Redirect output to suppress logs (or capture them)
+        // Redirect output
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
         // Set environment for venv
         var env = ProcessInfo.processInfo.environment
-        env["VIRTUAL_ENV"] = NSHomeDirectory() + "/git/whispermeet/python/.venv"
-        env["PATH"] = NSHomeDirectory() + "/git/whispermeet/python/.venv/bin:" + (env["PATH"] ?? "")
+        let venvPath = NSHomeDirectory() + "/git/whispermeet/python/.venv"
+        env["VIRTUAL_ENV"] = venvPath
+        env["PATH"] = venvPath + "/bin:" + (env["PATH"] ?? "")
         process.environment = env
 
         try process.run()
@@ -56,10 +89,17 @@ actor BackendClient {
         // Wait for server to be ready
         try await waitForServer(timeout: 30)
         isServerRunning = true
+        lastActivityTime = Date()
+
+        // Start idle monitor
+        startIdleMonitor()
     }
 
     /// Stop the Python backend server.
     func stopServer() {
+        idleCheckTask?.cancel()
+        idleCheckTask = nil
+
         serverProcess?.terminate()
         serverProcess = nil
         isServerRunning = false
@@ -71,10 +111,8 @@ actor BackendClient {
 
         while Date() < deadline {
             do {
-                let health = try await healthCheck()
-                if health.status == "ok" {
-                    return
-                }
+                _ = try await healthCheckInternal()
+                return
             } catch {
                 // Server not ready yet, retry
             }
@@ -84,17 +122,52 @@ actor BackendClient {
         throw BackendError.serverStartTimeout
     }
 
+    // MARK: - Idle Management
+
+    /// Start monitoring for idle timeout.
+    private func startIdleMonitor() {
+        idleCheckTask?.cancel()
+
+        idleCheckTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // Check every minute
+
+                let idleTime = Date().timeIntervalSince(lastActivityTime)
+                if idleTime >= idleTimeout {
+                    print("Backend server idle for \(Int(idleTime))s, shutting down...")
+                    stopServer()
+                    break
+                }
+            }
+        }
+    }
+
+    /// Update last activity time.
+    private func recordActivity() {
+        lastActivityTime = Date()
+    }
+
     // MARK: - API Endpoints
 
-    /// Check server health.
-    func healthCheck() async throws -> HealthResponse {
+    /// Internal health check (no server start).
+    private func healthCheckInternal() async throws -> HealthResponse {
         let url = baseURL.appendingPathComponent("health")
         let (data, _) = try await URLSession.shared.data(from: url)
         return try JSONDecoder().decode(HealthResponse.self, from: data)
     }
 
+    /// Check server health (starts server if needed).
+    func healthCheck() async throws -> HealthResponse {
+        try await ensureServerRunning()
+        recordActivity()
+        return try await healthCheckInternal()
+    }
+
     /// Transcribe audio file.
     func transcribe(audioURL: URL) async throws -> TranscribeResponse {
+        try await ensureServerRunning()
+        recordActivity()
+
         let url = baseURL.appendingPathComponent("transcribe")
         let request = try createMultipartRequest(url: url, fileURL: audioURL, fieldName: "file")
 
@@ -106,6 +179,9 @@ actor BackendClient {
 
     /// Diarize audio file (identify speakers).
     func diarize(audioURL: URL) async throws -> DiarizeResponse {
+        try await ensureServerRunning()
+        recordActivity()
+
         let url = baseURL.appendingPathComponent("diarize")
         let request = try createMultipartRequest(url: url, fileURL: audioURL, fieldName: "file")
 
@@ -117,6 +193,9 @@ actor BackendClient {
 
     /// Generate meeting summary.
     func summarize(request: SummarizeRequest) async throws -> SummarizeResponse {
+        try await ensureServerRunning()
+        recordActivity()
+
         let url = baseURL.appendingPathComponent("summarize")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
@@ -131,16 +210,15 @@ actor BackendClient {
 
     /// Identify known speakers from voice samples.
     func identifySpeakers(audioURL: URL, speakerSamples: [String: [Double]]) async throws -> IdentifyResponse {
+        try await ensureServerRunning()
+        recordActivity()
+
         let url = baseURL.appendingPathComponent("identify-speakers")
 
-        var request = try createMultipartRequest(url: url, fileURL: audioURL, fieldName: "file")
-
-        // Add speaker_samples as form field
         let samplesJSON = try JSONEncoder().encode(speakerSamples)
         let samplesString = String(data: samplesJSON, encoding: .utf8) ?? "{}"
 
-        // Recreate request with additional field
-        request = try createMultipartRequest(
+        let request = try createMultipartRequest(
             url: url,
             fileURL: audioURL,
             fieldName: "file",
@@ -155,6 +233,9 @@ actor BackendClient {
 
     /// Save voice profile for future identification.
     func saveVoice(audioURL: URL, name: String, start: Double, end: Double) async throws {
+        try await ensureServerRunning()
+        recordActivity()
+
         let url = baseURL.appendingPathComponent("save-voice")
 
         let request = try createMultipartRequest(
@@ -179,6 +260,9 @@ actor BackendClient {
         speakerNames: [String: String]? = nil,
         saveVoices: Bool = false
     ) async throws -> ProcessResponse {
+        try await ensureServerRunning()
+        recordActivity()
+
         let url = baseURL.appendingPathComponent("process")
 
         var fields: [String: String] = [
@@ -276,7 +360,7 @@ enum BackendError: LocalizedError {
     }
 }
 
-// MARK: - Response Types
+// MARK: - Response Types (keep as before)
 
 struct HealthResponse: Codable {
     let status: String

@@ -7,11 +7,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
-        startBackendServer()
+        // Server now starts lazily on first request - no startBackendServer() call here
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        stopBackendServer()
+        // Stop server on app quit
+        Task {
+            await BackendClient.shared.stopServer()
+        }
     }
 
     private func setupMenuBar() {
@@ -35,35 +38,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 popover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             }
-        }
-    }
-
-    // MARK: - Backend Server Management
-
-    private func startBackendServer() {
-        Task {
-            do {
-                try await BackendClient.shared.startServer()
-                print("Backend server started successfully")
-            } catch {
-                print("Failed to start backend server: \(error)")
-                // Show alert to user
-                await MainActor.run {
-                    let alert = NSAlert()
-                    alert.messageText = "Backend Server Error"
-                    alert.informativeText = error.localizedDescription
-                    alert.alertStyle = .warning
-                    alert.addButton(withTitle: "OK")
-                    alert.runModal()
-                }
-            }
-        }
-    }
-
-    private func stopBackendServer() {
-        Task {
-            await BackendClient.shared.stopServer()
-            print("Backend server stopped")
         }
     }
 }
