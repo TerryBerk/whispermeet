@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whispermeet"
+version = "0.1.0"
+description = "macOS meeting transcription app"
+requires-python = ">=3.10"
+dependencies = [
+    "rumps>=0.4.0",
+    "pyobjc-framework-ScreenCaptureKit>=10.0",
+    "pyobjc-framework-AVFoundation>=10.0",
+    "pywhispercpp>=1.0.0",
+    "pyannote.audio>=3.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+whispermeet = "whispermeet.app:main"
