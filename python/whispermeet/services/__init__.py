@@ -5,6 +5,7 @@ from .transcriber import Transcriber, TranscriptSegment, TwoStageTranscriber
 from .summary import SummaryGenerator, MeetingSummary
 from .audio_capture import AudioCapture, RecordingState
 from .diarizer import SpeakerDiarizer, SpeakerSegment
+from .voice_db import VoiceDatabase, VoiceProfile
 
 __all__ = [
     "WindowMonitor",
@@ -17,4 +18,6 @@ __all__ = [
     "RecordingState",
     "SpeakerDiarizer",
     "SpeakerSegment",
+    "VoiceDatabase",
+    "VoiceProfile",
 ]

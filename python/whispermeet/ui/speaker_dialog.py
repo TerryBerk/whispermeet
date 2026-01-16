@@ -44,6 +44,12 @@ class SpeakerNamesDialog:
         self.speaker_samples = speaker_samples or {}
         self.result: Optional[dict[str, str]] = None
         self._text_fields: dict[str, "NSTextField"] = {}
+        self.suggestions: dict[str, Optional[str]] = {}
+        self.should_remember: bool = True
+
+    def set_suggestions(self, suggestions: dict[str, Optional[str]]):
+        """Set name suggestions from voice matching."""
+        self.suggestions = suggestions
 
     def show(self) -> Optional[dict[str, str]]:
         """Show dialog and return speaker name assignments.
@@ -114,7 +120,9 @@ class SpeakerNamesDialog:
             text_field = NSTextField.alloc().initWithFrame_(
                 NSMakeRect(110, y_offset, 180, 25)
             )
-            text_field.setStringValue_(f"Speaker {i + 1}")
+            # Use suggestion if available, otherwise default
+            default_name = self.suggestions.get(speaker_id) or f"Speaker {i + 1}"
+            text_field.setStringValue_(default_name)
             text_field.setPlaceholderString_("Enter name")
             content_view.addSubview_(text_field)
             self._text_fields[speaker_id] = text_field
@@ -181,6 +189,7 @@ class SpeakerNamesDialog:
     def saveClicked_(self, sender):
         """Handle Save button click."""
         self._should_save = True
+        self.should_remember = self._remember_checkbox.state() == 1
         NSApp.stopModal()
         self._window.close()
 
