@@ -3,7 +3,10 @@
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Iterator
+from typing import Optional, Iterator, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .diarizer import SpeakerDiarizer
 
 try:
     from pywhispercpp.model import Model
@@ -117,3 +120,29 @@ class TwoStageTranscriber:
     def transcribe_final(self, audio_path: Path) -> list[TranscriptSegment]:
         """Get final high-quality transcription."""
         return self.final.transcribe(audio_path)
+
+    def transcribe_with_diarization(
+        self,
+        audio_path: Path,
+        diarizer: "SpeakerDiarizer",
+    ) -> list[TranscriptSegment]:
+        """Transcribe and assign speakers to segments.
+
+        Args:
+            audio_path: Path to audio file
+            diarizer: SpeakerDiarizer instance with completed diarization
+
+        Returns:
+            TranscriptSegments with speaker labels
+        """
+        # Get transcription
+        segments = self.transcribe_final(audio_path)
+
+        # Assign speakers based on segment midpoint
+        for segment in segments:
+            midpoint = (segment.start + segment.end) / 2
+            speaker_id = diarizer.get_speaker_at_time(midpoint)
+            if speaker_id:
+                segment.speaker = diarizer.get_name(speaker_id)
+
+        return segments

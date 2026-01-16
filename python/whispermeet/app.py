@@ -139,17 +139,31 @@ class WhisperMeetApp(rumps.App):
     def _process_recording(self, audio_path: Path, meeting: DetectedMeeting | None):
         """Process recording: transcribe and generate summary."""
         try:
-            # Final transcription
-            segments = self.transcriber.transcribe_final(audio_path)
+            from whispermeet.services.diarizer import SpeakerDiarizer
+
+            # Run diarization first
+            diarizer = SpeakerDiarizer()
+            try:
+                diarizer.diarize(audio_path)
+                speakers = diarizer.get_unique_speakers()
+                participant_names = [diarizer.get_name(s) for s in speakers]
+
+                # Transcribe with speaker labels
+                segments = self.transcriber.transcribe_with_diarization(audio_path, diarizer)
+            except Exception as e:
+                print(f"Diarization failed, using plain transcription: {e}")
+                segments = self.transcriber.transcribe_final(audio_path)
+                participant_names = ["Unknown"]
+
             transcript_text = "\n".join(seg.format() for seg in segments)
 
-            # Generate summary
+            # Generate summary with actual participants
             summary = self.summary_generator.generate(
                 transcript=transcript_text,
                 title=meeting.app.name if meeting else "Manual Recording",
                 date=datetime.now().strftime("%Y-%m-%d"),
-                duration="Unknown",  # TODO: Calculate from segments
-                participants=["Unknown"],  # TODO: From diarization
+                duration=self._format_duration(segments),
+                participants=participant_names,
             )
 
             # Save files
@@ -170,6 +184,20 @@ class WhisperMeetApp(rumps.App):
                 subtitle="Error",
                 message=str(e),
             )
+
+    def _format_duration(self, segments: list[TranscriptSegment]) -> str:
+        """Format duration from transcript segments."""
+        if not segments:
+            return "Unknown"
+        total_seconds = segments[-1].end
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        seconds = int(total_seconds % 60)
+        if hours > 0:
+            return f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            return f"{minutes}m {seconds}s"
+        return f"{seconds}s"
 
     def open_settings(self, _):
         """Open settings window."""
