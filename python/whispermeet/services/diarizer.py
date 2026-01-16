@@ -1,8 +1,12 @@
 """Speaker diarization service using pyannote.audio."""
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+# PyTorch 2.6+ workaround for pyannote model loading
+os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
 
 try:
     from pyannote.audio import Pipeline
