@@ -11,6 +11,7 @@ from whispermeet.services.window_monitor import WindowMonitor, DetectedMeeting
 from whispermeet.services.transcriber import TwoStageTranscriber, TranscriptSegment
 from whispermeet.services.summary import SummaryGenerator
 from whispermeet.services.audio_capture import AudioCapture
+from whispermeet.services.voice_db import VoiceDatabase
 
 
 class WhisperMeetApp(rumps.App):
@@ -28,6 +29,7 @@ class WhisperMeetApp(rumps.App):
         self.transcriber = TwoStageTranscriber()
         self.summary_generator = SummaryGenerator()
         self.audio_capture = AudioCapture(self.config.transcripts_dir)
+        self.voice_db = VoiceDatabase()
 
         self.recording = False
         self.current_meeting: DetectedMeeting | None = None
@@ -140,12 +142,45 @@ class WhisperMeetApp(rumps.App):
         """Process recording: transcribe and generate summary."""
         try:
             from whispermeet.services.diarizer import SpeakerDiarizer
+            from whispermeet.ui import SpeakerNamesDialog
 
             # Run diarization first
             diarizer = SpeakerDiarizer()
             try:
                 diarizer.diarize(audio_path)
                 speakers = diarizer.get_unique_speakers()
+
+                # Get speaker samples for voice preview
+                speaker_samples = diarizer.get_speaker_samples(audio_path)
+
+                # Get suggestions from voice database
+                try:
+                    suggestions = self.voice_db.suggest_names(audio_path, speaker_samples)
+                except Exception:
+                    suggestions = {}
+
+                # Show dialog with suggestions pre-filled
+                dialog = SpeakerNamesDialog(
+                    speakers=speakers,
+                    audio_path=audio_path,
+                    speaker_samples=speaker_samples,
+                )
+                dialog.set_suggestions(suggestions)
+                names = dialog.show()
+
+                if names:
+                    diarizer.assign_names(names)
+
+                    # Save to voice database if "Remember" was checked
+                    if dialog.should_remember:
+                        for speaker_id, name in names.items():
+                            if speaker_id in speaker_samples:
+                                start, end = speaker_samples[speaker_id]
+                                try:
+                                    self.voice_db.add_profile(name, audio_path, start, end)
+                                except Exception as e:
+                                    print(f"Failed to save voice profile: {e}")
+
                 participant_names = [diarizer.get_name(s) for s in speakers]
 
                 # Transcribe with speaker labels
