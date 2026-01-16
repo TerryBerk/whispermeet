@@ -1,0 +1,32 @@
+# Worktrees
+.worktrees/
+
+# macOS
+.DS_Store
+
+# Swift
+.build/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+DerivedData/
+*.swiftpm/xcode/xcuserdata/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Audio/Transcripts (local testing)
+*.wav
+*.m4a
+*.mp3
