@@ -7,6 +7,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
+        // Server now starts lazily on first request - no startBackendServer() call here
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Stop server on app quit
+        Task {
+            await BackendClient.shared.stopServer()
+        }
     }
 
     private func setupMenuBar() {
