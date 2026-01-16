@@ -30,3 +30,10 @@ build/
 *.wav
 *.m4a
 *.mp3
+
+# Secrets (never commit)
+.env
+.env.*
+*.token
+*secret*
+*credentials*
