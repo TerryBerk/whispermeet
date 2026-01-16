@@ -1,5 +1,6 @@
 """Main application entry point."""
 
+import asyncio
 import rumps
 import threading
 from datetime import datetime
@@ -9,6 +10,7 @@ from whispermeet.models.config import AppConfig
 from whispermeet.services.window_monitor import WindowMonitor, DetectedMeeting
 from whispermeet.services.transcriber import TwoStageTranscriber, TranscriptSegment
 from whispermeet.services.summary import SummaryGenerator
+from whispermeet.services.audio_capture import AudioCapture
 
 
 class WhisperMeetApp(rumps.App):
@@ -25,6 +27,7 @@ class WhisperMeetApp(rumps.App):
         self.window_monitor = WindowMonitor(self.config)
         self.transcriber = TwoStageTranscriber()
         self.summary_generator = SummaryGenerator()
+        self.audio_capture = AudioCapture(self.config.transcripts_dir)
 
         self.recording = False
         self.current_meeting: DetectedMeeting | None = None
@@ -76,14 +79,28 @@ class WhisperMeetApp(rumps.App):
         self.recording = True
         self.title = "● REC"
 
-        # TODO: Integrate with AudioCapture service
-        timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-        app_name = meeting.app.name if meeting else "manual"
-        safe_name = app_name.replace(" ", "-").lower()
-        self.audio_path = self.config.transcripts_dir / f"{timestamp}-{safe_name}.wav"
+        # Start audio capture in background thread
+        def start_capture():
+            try:
+                if meeting:
+                    self.audio_path = asyncio.run(
+                        self.audio_capture.start_recording(meeting.app.bundle_id)
+                    )
+                else:
+                    # Fallback for manual recording without a detected meeting
+                    timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+                    self.audio_path = self.config.transcripts_dir / f"{timestamp}-manual.wav"
+                    self.config.transcripts_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                print(f"Failed to start audio capture: {e}")
+                # Fallback to placeholder path
+                timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+                app_name = meeting.app.name if meeting else "manual"
+                safe_name = app_name.replace(" ", "-").lower()
+                self.audio_path = self.config.transcripts_dir / f"{timestamp}-{safe_name}.wav"
+                self.config.transcripts_dir.mkdir(parents=True, exist_ok=True)
 
-        # Ensure directory exists
-        self.config.transcripts_dir.mkdir(parents=True, exist_ok=True)
+        threading.Thread(target=start_capture, daemon=True).start()
 
         rumps.notification(
             title="WhisperMeet",
@@ -102,13 +119,19 @@ class WhisperMeetApp(rumps.App):
             message="Processing transcript...",
         )
 
-        # Process in background
-        if self.audio_path:
-            threading.Thread(
-                target=self._process_recording,
-                args=(self.audio_path, self.current_meeting),
-                daemon=True,
-            ).start()
+        # Stop audio capture and process in background
+        def stop_and_process():
+            try:
+                audio_path = asyncio.run(self.audio_capture.stop_recording())
+                if audio_path:
+                    self._process_recording(audio_path, self.current_meeting)
+            except Exception as e:
+                print(f"Failed to stop audio capture: {e}")
+                # Fall back to using stored audio_path
+                if self.audio_path:
+                    self._process_recording(self.audio_path, self.current_meeting)
+
+        threading.Thread(target=stop_and_process, daemon=True).start()
 
         self.audio_path = None
         self.current_meeting = None

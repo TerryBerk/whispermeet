@@ -3,6 +3,7 @@
 from .window_monitor import WindowMonitor
 from .transcriber import Transcriber, TranscriptSegment, TwoStageTranscriber
 from .summary import SummaryGenerator, MeetingSummary
+from .audio_capture import AudioCapture, RecordingState
 
 __all__ = [
     "WindowMonitor",
@@ -11,4 +12,6 @@ __all__ = [
     "TwoStageTranscriber",
     "SummaryGenerator",
     "MeetingSummary",
+    "AudioCapture",
+    "RecordingState",
 ]
